@@ -128,7 +128,7 @@ def detect_drain_events(series: pd.Series, cauldron_id: str, fill_rate: float,
     in_drain = False
     drain_start = None
     drain_start_idx = None
-    peak_level = None
+    drain_start_level = None  # NEW: Track level at drain start, not peak
     
     for i in range(len(series)):
         timestamp = series.index[i]
@@ -136,18 +136,17 @@ def detect_drain_events(series: pd.Series, cauldron_id: str, fill_rate: float,
         is_drain_point = is_draining.iloc[i] if i < len(is_draining) else False
         
         if not in_drain:
-            if peak_level is None or level > peak_level:
-                peak_level = level
             if is_drain_point:
                 in_drain = True
                 drain_start = timestamp
                 drain_start_idx = i
+                drain_start_level = level  # FIXED: Use actual level at drain start
         else:
             if not is_drain_point:
                 drain_end = timestamp
                 drain_end_idx = i
                 level_after = level
-                level_before = peak_level
+                level_before = drain_start_level  # FIXED: Use drain start level
                 level_drop = level_before - level_after
                 drain_duration = (drain_end - drain_start).total_seconds() / 60
                 potion_generated = fill_rate * drain_duration
@@ -170,7 +169,7 @@ def detect_drain_events(series: pd.Series, cauldron_id: str, fill_rate: float,
                     })
                 
                 in_drain = False
-                peak_level = level
+                drain_start_level = None  # Reset for next drain
     
     return pd.DataFrame(drain_events)
 
