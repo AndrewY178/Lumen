@@ -29,57 +29,34 @@ This will:
 
 ```
 .
-├── config.py              # Configuration constants
-├── api_client.py          # API data fetching
-├── data_processor.py      # Data transformation & fill rate calculation
-├── drain_detector.py      # Drain event detection algorithm
-├── ticket_matcher.py      # Ticket matching & discrepancy detection
-├── analytics.py           # Overflow risk & system analytics
-├── main.py               # Main runner script
-├── requirements.txt      # Python dependencies
+├── analysis.py            # All data analysis functions
+├── app.py                 # Streamlit dashboard
+├── main.py                # CLI runner script
+├── requirements.txt       # Python dependencies
 └── potion_monitoring.ipynb  # Original analysis notebook
 ```
 
 ## 🔧 Module Overview
 
-### `api_client.py`
-Handles all API interactions with caching support:
-- Fetches cauldron level data
-- Fetches transport tickets
-- Fetches cauldron metadata
-- Fetches network graph and travel times
+### `analysis.py`
+Consolidated module with all analysis functions:
+- **API Functions**: Fetch data from all endpoints with caching
+- **Data Processing**: Transform JSON to DataFrames, calculate fill rates
+- **Drain Detection**: Rate-of-change algorithm with continuous fill compensation
+- **Ticket Matching**: Dynamic matching with discrepancy detection
+- **Analytics**: Overflow risk, capacity utilization, system summaries
 
-### `data_processor.py`
-Transforms raw API data into pandas DataFrames:
-- Converts timestamps and normalizes JSON
-- Calculates fill rates for each cauldron
-- Prepares data for analysis
+### `app.py`
+Interactive Streamlit dashboard:
+- Network map with cauldron and market locations
+- Clickable nodes to view individual cauldron details
+- Time series plots and rate-of-change visualization
+- Real-time statistics and overflow risk indicators
 
-### `drain_detector.py`
-Detects potion collection events:
-- Rate-of-change based algorithm
-- Handles continuous filling during drainage
-- Accounts for travel time to market
-- Calculates total collected volume
-
-### `ticket_matcher.py`
-Matches drain events to transport tickets:
-- Dynamic matching by cauldron, date, and volume
-- Identifies under-reported, over-reported, and missing tickets
-- Configurable tolerance threshold
-
-### `analytics.py`
-Provides analytics and forecasting:
-- Overflow risk calculation
-- Capacity utilization tracking
-- System-wide summary statistics
-- Suspicious cauldron identification
-
-### `config.py`
-Centralized configuration:
+### Configuration
+Constants defined in `analysis.py`:
 ```python
 BASE_URL = "https://hackutd2025.eog.systems"
-MARKET_UNLOAD_TIME_MINUTES = 15
 NEGATIVE_RATE_THRESHOLD = -0.05
 MIN_DRAIN_VOLUME = 20.0
 TICKET_TOLERANCE_PCT = 2.0
@@ -94,36 +71,32 @@ TICKET_TOLERANCE_PCT = 2.0
 | `fill_rates.csv` | Fill rates for each cauldron (per min/hour) |
 | `overflow_risk.csv` | Overflow risk analysis for all cauldrons |
 
-## 🎯 Using Modules for Streamlit
+## 🎯 Using the Analysis Module
 
-Import and use modules directly in your Streamlit app:
+Simple function-based API:
 
 ```python
-from api_client import APIClient
-from data_processor import DataProcessor
-from drain_detector import DrainDetector
-from ticket_matcher import TicketMatcher
-from analytics import Analytics
+import analysis
 
-# Fetch data
-api_client = APIClient(cache_enabled=True)
-raw_data = api_client.fetch_all_data()
+# Fetch all data
+raw_data = analysis.fetch_all_data()
 
-# Process
-processor = DataProcessor()
-df_levels = processor.transform_level_data(raw_data['level_data'])
+# Transform data
+df_levels = analysis.transform_level_data(raw_data['level_data'])
+df_tickets = analysis.transform_tickets(raw_data['tickets'])
 
-# Analyze
-detector = DrainDetector()
-df_drains = detector.detect_all_drains(df_levels, fill_rates, travel_times)
+# Calculate fill rates and detect drains
+df_fill_rates = analysis.calculate_fill_rates(df_levels)
+fill_rates = dict(zip(df_fill_rates['cauldron'], df_fill_rates['fill_rate_per_min']))
+cauldron_ids = analysis.get_cauldron_ids(df_levels)
+travel_times = analysis.fetch_travel_times(cauldron_ids)
+df_drains = analysis.detect_all_drains(df_levels, fill_rates, travel_times)
 
 # Match tickets
-matcher = TicketMatcher()
-df_matched = matcher.match_drains_to_tickets(df_drains, df_tickets)
+df_matched = analysis.match_drains_to_tickets(df_drains, df_tickets)
 
 # Get analytics
-analytics = Analytics()
-overflow_risk = analytics.calculate_overflow_risk(df_levels, df_cauldrons, df_fill_rates)
+df_overflow = analysis.calculate_overflow_risk(df_levels, df_cauldrons, df_fill_rates)
 ```
 
 ## 🔬 Key Algorithms
@@ -165,7 +138,7 @@ match = find_ticket_by(cauldron_id, ticket_date, volume)
 ## 🐛 Troubleshooting
 
 **No drain events detected:**
-- Adjust `NEGATIVE_RATE_THRESHOLD` in config.py (try -0.1 for more sensitivity)
+- Adjust `NEGATIVE_RATE_THRESHOLD` in analysis.py (try -0.1 for more sensitivity)
 - Lower `MIN_DRAIN_VOLUME` (try 10.0)
 
 **High false positive rate:**
@@ -173,8 +146,7 @@ match = find_ticket_by(cauldron_id, ticket_date, volume)
 - Increase `MIN_DRAIN_VOLUME` (higher = only large drains)
 
 **Ticket matching issues:**
-- Adjust `TICKET_TOLERANCE_PCT` in config.py
-- Check travel time calculations in api_client.py
+- Adjust `TICKET_TOLERANCE_PCT` in analysis.py
 
 ## 🏆 Next Steps
 
