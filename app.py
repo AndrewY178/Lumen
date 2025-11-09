@@ -121,10 +121,10 @@ def plot_cauldron_map(df_cauldrons, market_data, df_overflow, network_data):
         x=[market_lon],
         y=[market_lat],
         mode='markers+text',
-        marker=dict(size=30, color='gold', symbol='star', line=dict(width=2, color='black')),
-        text=['★'],
+        marker=dict(size=30, color='#FF6B6B', symbol='hexagon', line=dict(width=2, color='white')),
+        text='🍄',
         textposition="middle center",
-        textfont=dict(size=18, color='white'),
+        textfont=dict(size=20),
         name='Market',
         hovertemplate='<b>Enchanted Market</b><extra></extra>'
     ))
