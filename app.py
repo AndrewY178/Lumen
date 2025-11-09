@@ -32,6 +32,7 @@ def load_data():
     df_couriers = pd.DataFrame(couriers_data if isinstance(couriers_data, list) else [couriers_data])
     
     market_data = raw_data['market']
+    network_data = raw_data['network']
     
     return {
         'levels': df_levels,
@@ -47,19 +48,45 @@ def load_data():
         'patterns': patterns,
         'couriers': df_couriers,
         'market': market_data,
+        'network': network_data,
         'travel_times': travel_times
     }
 
-def plot_cauldron_map(df_cauldrons, market_data, df_overflow):
+def plot_cauldron_map(df_cauldrons, market_data, df_overflow, network_data):
     fig = go.Figure()
     
-    # Add cauldrons
+    # Build node position mapping
     cauldrons_list = df_cauldrons.reset_index()
-    colors = cauldrons_list.index.map(
-        lambda x: f"cauldron_{x:03d}" if x < len(cauldrons_list) else "cauldron_000"
-    )
+    node_positions = {}
+    for _, cauldron in cauldrons_list.iterrows():
+        node_positions[cauldron['id']] = (cauldron['longitude'], cauldron['latitude'])
     
-    # Color by risk level
+    market_lat = market_data.get('latitude', 33.2145)
+    market_lon = market_data.get('longitude', -97.133)
+    market_id = market_data.get('id', 'market')
+    node_positions[market_id] = (market_lon, market_lat)
+    
+    # Draw edges first (behind nodes)
+    edges = network_data.get('edges', [])
+    for edge in edges:
+        from_node = edge.get('from')
+        to_node = edge.get('to')
+        
+        if from_node in node_positions and to_node in node_positions:
+            x0, y0 = node_positions[from_node]
+            x1, y1 = node_positions[to_node]
+            
+            fig.add_trace(go.Scatter(
+                x=[x0, x1],
+                y=[y0, y1],
+                mode='lines',
+                line=dict(color='lightgray', width=1),
+                opacity=0.5,
+                hoverinfo='skip',
+                showlegend=False
+            ))
+    
+    # Color cauldrons by risk level
     risk_colors = []
     for _, cauldron in cauldrons_list.iterrows():
         cauldron_id = cauldron['id']
@@ -75,41 +102,52 @@ def plot_cauldron_map(df_cauldrons, market_data, df_overflow):
         else:
             risk_colors.append('blue')
     
+    # Add cauldrons
     fig.add_trace(go.Scatter(
         x=cauldrons_list['longitude'],
         y=cauldrons_list['latitude'],
         mode='markers+text',
         marker=dict(size=20, color=risk_colors, line=dict(width=2, color='white')),
-        text=cauldrons_list['id'],
+        text=cauldrons_list['id'].str.replace('cauldron_', ''),
         textposition="top center",
-        textfont=dict(size=10),
+        textfont=dict(size=9),
         name='Cauldrons',
         customdata=cauldrons_list[['id', 'name', 'max_volume']],
         hovertemplate='<b>%{customdata[0]}</b><br>%{customdata[1]}<br>Max: %{customdata[2]}L<extra></extra>'
     ))
     
     # Add market
-    market_lat = market_data.get('latitude', 33.2145)
-    market_lon = market_data.get('longitude', -97.133)
     fig.add_trace(go.Scatter(
         x=[market_lon],
         y=[market_lat],
         mode='markers+text',
         marker=dict(size=30, color='gold', symbol='star', line=dict(width=2, color='black')),
-        text=['Market'],
-        textposition="top center",
-        textfont=dict(size=12, color='black'),
+        text=['★'],
+        textposition="middle center",
+        textfont=dict(size=18, color='white'),
         name='Market',
         hovertemplate='<b>Enchanted Market</b><extra></extra>'
     ))
     
     fig.update_layout(
-        title="Potion Factory Network Map (Click cauldron to view details)",
-        xaxis_title="Longitude",
-        yaxis_title="Latitude",
+        title="Potion Factory Network Map",
+        xaxis=dict(
+            title="Longitude",
+            showgrid=False,
+            zeroline=False,
+            scaleanchor="y",
+            scaleratio=1
+        ),
+        yaxis=dict(
+            title="Latitude",
+            showgrid=False,
+            zeroline=False
+        ),
         height=600,
         hovermode='closest',
-        showlegend=True
+        showlegend=True,
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)'
     )
     
     return fig
@@ -185,6 +223,7 @@ df_witch_perf = data['witch_perf']
 df_priority = data['priority']
 patterns = data['patterns']
 market_data = data['market']
+network_data = data['network']
 
 # Sidebar stats
 st.sidebar.header("⚡ System Status")
@@ -208,7 +247,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(["🗺️ Network Map", "🎫 Ticket Vali
 
 with tab1:
     st.subheader("Cauldron Network Map")
-    map_fig = plot_cauldron_map(df_cauldrons, market_data, df_overflow)
+    map_fig = plot_cauldron_map(df_cauldrons, market_data, df_overflow, network_data)
     st.plotly_chart(map_fig, use_container_width=True)
     
     col1, col2, col3 = st.columns(3)
@@ -431,4 +470,6 @@ with tab5:
                 }),
                 use_container_width=True
             )
+
+
 
