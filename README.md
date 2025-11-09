@@ -1,6 +1,6 @@
 # 🧙 Potion Flow Monitoring System
 
-Modular Python system for the Poyo's Potion Factory hackathon challenge.
+Modular Python system for the Poyo's Potion Factory hackathon challenge (HackUTD2025).
 
 ## 🚀 Quick Start
 
