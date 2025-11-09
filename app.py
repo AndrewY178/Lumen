@@ -52,7 +52,7 @@ def load_data():
         'travel_times': travel_times
     }
 
-def plot_cauldron_map(df_cauldrons, market_data, df_overflow, network_data):
+def plot_cauldron_map(df_cauldrons, market_data, df_overflow, network_data, df_levels, df_fill_rates):
     fig = go.Figure()
     
     # Build node position mapping
@@ -86,34 +86,130 @@ def plot_cauldron_map(df_cauldrons, market_data, df_overflow, network_data):
                 showlegend=False
             ))
     
-    # Color cauldrons by risk level
+    # Prepare cauldron data with levels and metrics
+    cauldron_data = []
+    marker_sizes = []
     risk_colors = []
+    
     for _, cauldron in cauldrons_list.iterrows():
         cauldron_id = cauldron['id']
+        
+        # Get current level
+        cauldron_col = f'cauldron_levels.{cauldron_id}'
+        current_level = np.nan
+        if cauldron_col in df_levels.columns:
+            level_series = df_levels[cauldron_col].dropna()
+            if len(level_series) > 0:
+                current_level = level_series.iloc[-1]
+        
+        # Get overflow data
         overflow_row = df_overflow[df_overflow['cauldron_id'] == cauldron_id]
+        max_volume = cauldron.get('max_volume', np.nan)
+        utilization_pct = np.nan
+        hours_to_overflow = np.nan
+        risk_level = 'UNKNOWN'
+        fill_rate = np.nan
+        
         if len(overflow_row) > 0:
-            risk = overflow_row.iloc[0]['risk_level']
-            if risk == 'HIGH':
-                risk_colors.append('red')
-            elif risk == 'MEDIUM':
-                risk_colors.append('orange')
-            else:
-                risk_colors.append('green')
+            risk_level = overflow_row.iloc[0]['risk_level']
+            utilization_pct = overflow_row.iloc[0]['utilization_pct']
+            hours_to_overflow = overflow_row.iloc[0]['hours_to_overflow']
+            max_volume = overflow_row.iloc[0]['max_volume']
+        
+        # Get fill rate
+        fill_rate_row = df_fill_rates[df_fill_rates['cauldron'] == cauldron_col]
+        if len(fill_rate_row) > 0:
+            fill_rate = fill_rate_row.iloc[0]['fill_rate_per_hour']
+        
+        # Color by risk level
+        if risk_level == 'HIGH':
+            risk_colors.append('red')
+        elif risk_level == 'MEDIUM':
+            risk_colors.append('orange')
+        elif risk_level == 'LOW':
+            risk_colors.append('green')
         else:
             risk_colors.append('blue')
+        
+        # Marker size proportional to utilization (10-30 range)
+        if not np.isnan(utilization_pct):
+            marker_size = 10 + (utilization_pct / 100) * 20
+        else:
+            marker_size = 15
+        marker_sizes.append(marker_size)
+        
+        # Prepare hover data (use 0 for missing numeric values to avoid formatting issues)
+        cauldron_data.append({
+            'id': cauldron_id,
+            'name': cauldron.get('name', 'N/A'),
+            'current_level': current_level if not np.isnan(current_level) else 0,
+            'max_volume': max_volume if not np.isnan(max_volume) else 0,
+            'utilization_pct': utilization_pct if not np.isnan(utilization_pct) else 0,
+            'hours_to_overflow': hours_to_overflow if not np.isnan(hours_to_overflow) else 0,
+            'fill_rate': fill_rate if not np.isnan(fill_rate) else 0,
+            'risk_level': risk_level,
+            'has_level': not np.isnan(current_level),
+            'has_max': not np.isnan(max_volume),
+            'has_util': not np.isnan(utilization_pct),
+            'has_hours': not np.isnan(hours_to_overflow),
+            'has_fill': not np.isnan(fill_rate)
+        })
     
-    # Add cauldrons
+    # Add cauldrons with level labels
+    level_labels = []
+    for cd in cauldron_data:
+        if cd['has_level'] and cd['current_level'] > 0:
+            level_labels.append(f"{cd['current_level']:.0f}L")
+        else:
+            level_labels.append("")
+    
+    # Create hover text with proper handling of missing values
+    hover_texts = []
+    for cd in cauldron_data:
+        level_str = f"{cd['current_level']:.1f}L" if cd['has_level'] else "N/A"
+        max_str = f"{cd['max_volume']:.0f}L" if cd['has_max'] else "N/A"
+        util_str = f"{cd['utilization_pct']:.1f}%" if cd['has_util'] else "N/A"
+        hours_str = f"{cd['hours_to_overflow']:.1f}h" if cd['has_hours'] else "N/A"
+        fill_str = f"{cd['fill_rate']:.2f} L/h" if cd['has_fill'] else "N/A"
+        
+        hover_texts.append(
+            f"<b>{cd['id']}</b><br>"
+            f"{cd['name']}<br>"
+            f"Level: {level_str} / {max_str}<br>"
+            f"Utilization: {util_str}<br>"
+            f"Hours to Overflow: {hours_str}<br>"
+            f"Fill Rate: {fill_str}<br>"
+            f"Risk: {cd['risk_level']}"
+        )
+    
     fig.add_trace(go.Scatter(
         x=cauldrons_list['longitude'],
         y=cauldrons_list['latitude'],
         mode='markers+text',
-        marker=dict(size=20, color=risk_colors, line=dict(width=2, color='white')),
+        marker=dict(
+            size=marker_sizes,
+            color=risk_colors,
+            line=dict(width=2, color='white'),
+            opacity=0.8
+        ),
         text=cauldrons_list['id'].str.replace('cauldron_', ''),
         textposition="top center",
-        textfont=dict(size=9),
+        textfont=dict(size=9, color='black'),
         name='Cauldrons',
-        customdata=cauldrons_list[['id', 'name', 'max_volume']],
-        hovertemplate='<b>%{customdata[0]}</b><br>%{customdata[1]}<br>Max: %{customdata[2]}L<extra></extra>'
+        customdata=hover_texts,
+        hovertemplate='%{customdata}<extra></extra>'
+    ))
+    
+    # Add level labels below cauldron IDs
+    fig.add_trace(go.Scatter(
+        x=cauldrons_list['longitude'],
+        y=cauldrons_list['latitude'] - 0.0005,  # Slightly below the marker
+        mode='text',
+        text=level_labels,
+        textposition="top center",
+        textfont=dict(size=8, color='darkblue'),
+        showlegend=False,
+        hoverinfo='skip'
     ))
     
     # Add market
@@ -126,11 +222,11 @@ def plot_cauldron_map(df_cauldrons, market_data, df_overflow, network_data):
         textposition="middle center",
         textfont=dict(size=20),
         name='Market',
-        hovertemplate='<b>Enchanted Market</b><extra></extra>'
+        hovertemplate='<b>Enchanted Market</b><br>Sales Point<extra></extra>'
     ))
     
     fig.update_layout(
-        title="Potion Factory Network Map",
+        title="Potion Factory Network Map - All Cauldrons, Levels & Sales Point",
         xaxis=dict(
             title="Longitude",
             showgrid=False,
@@ -246,17 +342,78 @@ st.sidebar.metric("Total Unaccounted", f"{patterns['total_unaccounted']:.0f}L")
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["🗺️ Network Map", "🎫 Ticket Validation", "👩‍🦰 Witch Performance", "⚠️ Overflow Priority", "📊 Cauldron Details"])
 
 with tab1:
-    st.subheader("Cauldron Network Map")
-    map_fig = plot_cauldron_map(df_cauldrons, market_data, df_overflow, network_data)
+    st.subheader("Potion Network Map")
+    st.markdown("**Map Legend:** Marker size indicates utilization | Color indicates risk level | Hover for details")
+    
+    map_fig = plot_cauldron_map(df_cauldrons, market_data, df_overflow, network_data, df_levels, df_fill_rates)
     st.plotly_chart(map_fig, use_container_width=True)
     
+    # Network Metrics Section
+    st.markdown("---")
+    st.subheader("📊 Network Metrics")
+    
+    # Calculate summary metrics
+    total_cauldrons = len(df_cauldrons)
+    total_capacity = df_cauldrons['max_volume'].sum() if 'max_volume' in df_cauldrons.columns else 0
+    current_total_level = df_overflow['current_level'].sum() if len(df_overflow) > 0 else 0
+    avg_utilization = df_overflow['utilization_pct'].mean() if len(df_overflow) > 0 else 0
+    high_risk_count = len(df_overflow[df_overflow['risk_level'] == 'HIGH']) if len(df_overflow) > 0 else 0
+    medium_risk_count = len(df_overflow[df_overflow['risk_level'] == 'MEDIUM']) if len(df_overflow) > 0 else 0
+    low_risk_count = len(df_overflow[df_overflow['risk_level'] == 'LOW']) if len(df_overflow) > 0 else 0
+    avg_fill_rate = df_fill_rates['fill_rate_per_hour'].mean() if len(df_fill_rates) > 0 else 0
+    total_drain_events = len(data['drain_events'])
+    total_tickets = len(data['tickets'])
+    
+    # Display metrics in columns
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Cauldrons", total_cauldrons)
+        st.metric("Total Capacity", f"{total_capacity:.0f}L")
+    with col2:
+        st.metric("Current Total Level", f"{current_total_level:.0f}L")
+        st.metric("Avg Utilization", f"{avg_utilization:.1f}%")
+    with col3:
+        st.metric("High Risk Cauldrons", high_risk_count, delta=f"Medium: {medium_risk_count}, Low: {low_risk_count}")
+        st.metric("Avg Fill Rate", f"{avg_fill_rate:.2f} L/h")
+    with col4:
+        st.metric("Total Drain Events", total_drain_events)
+        st.metric("Total Tickets", total_tickets)
+    
+    # Risk Distribution
+    st.markdown("### Risk Level Distribution")
+    st.caption("High Risk: < 12 hours to overflow | Medium Risk: 12-24 hours | Low Risk: > 24 hours")
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Total Drain Events", len(data['drain_events']))
+        st.metric("🔴 High Risk", high_risk_count)
     with col2:
-        st.metric("Total Tickets", len(data['tickets']))
+        st.metric("🟠 Medium Risk", medium_risk_count)
     with col3:
-        st.metric("Avg Fill Rate", f"{df_fill_rates['fill_rate_per_hour'].mean():.1f} L/hr")
+        st.metric("🟢 Low Risk", low_risk_count)
+    
+    # Cauldron Details Table
+    if len(df_overflow) > 0:
+        st.markdown("### Cauldron Status Summary")
+        display_columns = ['cauldron_id', 'current_level', 'max_volume', 'utilization_pct', 
+                          'hours_to_overflow', 'risk_level']
+        df_display = df_overflow[display_columns].copy()
+        df_display.columns = ['Cauldron ID', 'Current Level (L)', 'Max Volume (L)', 
+                             'Utilization (%)', 'Hours to Overflow', 'Risk Level']
+        df_display = df_display.sort_values('Hours to Overflow')
+        
+        # Color code by risk level
+        def color_risk(val):
+            if val == 'HIGH':
+                return 'background-color: #ffcccc'
+            elif val == 'MEDIUM':
+                return 'background-color: #ffe6cc'
+            else:
+                return 'background-color: #ccffcc'
+        
+        st.dataframe(
+            df_display.style.applymap(color_risk, subset=['Risk Level']),
+            use_container_width=True,
+            height=400
+        )
 
 with tab2:
     st.subheader("Daily Ticket Reconciliation")
